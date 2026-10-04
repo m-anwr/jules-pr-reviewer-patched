@@ -128,6 +128,42 @@ async function waitUntilSessionReady(session: {
   throw new Error("Session did not become ready within timeout.");
 }
 
+/**
+ * Some Jules sessions finish without emitting an `agentMessaged` activity: the agent writes its
+ * output into a workspace file instead, which reaches us as an activity artifact carrying a
+ * changeSet git patch. Reconstruct the added lines of every patched file and return the last
+ * candidate whose content looks like the review (a verdict-bearing payload), so later revisions
+ * win over scratch files and earlier drafts.
+ */
+function extractReviewFromArtifacts(activities: unknown[]): string {
+  let candidate = "";
+  for (const activity of activities) {
+    const artifacts = (activity as { artifacts?: unknown })?.artifacts;
+    if (!Array.isArray(artifacts)) continue;
+    for (const artifact of artifacts) {
+      const patch = (artifact as { changeSet?: { gitPatch?: { unidiffPatch?: unknown } } })
+        ?.changeSet?.gitPatch?.unidiffPatch;
+      if (typeof patch !== "string") continue;
+      for (const fileSection of patch.split("diff --git ").slice(1)) {
+        const added: string[] = [];
+        let inHunk = false;
+        for (const line of fileSection.split("\n")) {
+          if (line.startsWith("@@")) {
+            inHunk = true;
+          } else if (inHunk && line.startsWith("+") && !line.startsWith("+++")) {
+            added.push(line.slice(1));
+          }
+        }
+        const text = added.join("\n").trim();
+        if (text && /"verdict"\s*:\s*"(approve|comment|block)"/i.test(text)) {
+          candidate = text;
+        }
+      }
+    }
+  }
+  return candidate;
+}
+
 async function pollForReview(
   session: PollableSession,
   timeoutMs: number
@@ -139,12 +175,32 @@ async function pollForReview(
     try {
       await session.hydrate();
       let last = "";
+      const activities: unknown[] = [];
       for await (const a of session.history()) {
+        activities.push(a);
         if (a.type === "agentMessaged") last = a.message;
       }
       if (last) {
         core.info(`Got agentMessaged on attempt ${attempt}.`);
         return last;
+      }
+      // Fallback: the session may have completed without ever sending the review as an agent
+      // message. If it reached a terminal state, try recovering the review from artifacts and
+      // bail out early instead of pointlessly waiting for deadline.
+      const info = (await session.info()) as { state?: string } | undefined;
+      const state = String(info?.state ?? "").toUpperCase();
+      if (state === "COMPLETED" || state === "FAILED") {
+        const recovered = extractReviewFromArtifacts(activities);
+        if (recovered) {
+          core.info(
+            `Session ${state.toLowerCase()} with no agentMessaged — using review recovered from artifacts (attempt ${attempt}).`
+          );
+          return recovered;
+        }
+        core.info(
+          `Session ${state.toLowerCase()} with no agentMessaged and no verdict-bearing artifacts.`
+        );
+        return "";
       }
       core.info(`No agentMessaged yet (attempt ${attempt})…`);
     } catch (err) {
