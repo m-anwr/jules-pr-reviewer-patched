@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/m-anwr/jules-pr-reviewer-patched/compare/v1.8.0...v1.8.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **poll:** recover review from changeSet artifacts when Jules completes without a message ([b1a69d9](https://github.com/m-anwr/jules-pr-reviewer-patched/commit/b1a69d97a022655a18324321aefbf0b21d047c1e))
+
 ## [1.8.0](https://github.com/thalesraymond/jules-pr-reviewer/compare/v1.7.0...v1.8.0) (2026-09-29)
 
 
