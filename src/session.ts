@@ -162,9 +162,7 @@ function extractReviewFromArtifacts(activities: unknown[]): string {
       if (typeof patch !== "string") continue;
       const sections = patch.split("diff --git ").slice(1);
       for (const fileSection of sections) {
-        const text = addedLinesFromPatch(fileSection)
-          .join("\n")
-          .trim();
+        const text = addedLinesFromPatch(fileSection).join("\n").trim();
         const looksLikeReview =
           text && /"verdict"\s*:\s*"(approve|comment|block)"/i.test(text);
         if (looksLikeReview) {
