@@ -135,27 +135,39 @@ async function waitUntilSessionReady(session: {
  * candidate whose content looks like the review (a verdict-bearing payload), so later revisions
  * win over scratch files and earlier drafts.
  */
+interface PatchArtifact {
+  changeSet?: { gitPatch?: { unidiffPatch?: string } };
+}
+
+function addedLinesFromPatch(fileSection: string): string[] {
+  const added: string[] = [];
+  let inHunk = false;
+  for (const line of fileSection.split("\n")) {
+    if (line.startsWith("@@")) {
+      inHunk = true;
+    } else if (inHunk && line.startsWith("+") && !line.startsWith("+++")) {
+      added.push(line.slice(1));
+    }
+  }
+  return added;
+}
+
 function extractReviewFromArtifacts(activities: unknown[]): string {
   let candidate = "";
   for (const activity of activities) {
     const artifacts = (activity as { artifacts?: unknown })?.artifacts;
     if (!Array.isArray(artifacts)) continue;
-    for (const artifact of artifacts) {
-      const patch = (artifact as { changeSet?: { gitPatch?: { unidiffPatch?: unknown } } })
-        ?.changeSet?.gitPatch?.unidiffPatch;
+    for (const artifact of artifacts as PatchArtifact[]) {
+      const patch = artifact?.changeSet?.gitPatch?.unidiffPatch;
       if (typeof patch !== "string") continue;
-      for (const fileSection of patch.split("diff --git ").slice(1)) {
-        const added: string[] = [];
-        let inHunk = false;
-        for (const line of fileSection.split("\n")) {
-          if (line.startsWith("@@")) {
-            inHunk = true;
-          } else if (inHunk && line.startsWith("+") && !line.startsWith("+++")) {
-            added.push(line.slice(1));
-          }
-        }
-        const text = added.join("\n").trim();
-        if (text && /"verdict"\s*:\s*"(approve|comment|block)"/i.test(text)) {
+      const sections = patch.split("diff --git ").slice(1);
+      for (const fileSection of sections) {
+        const text = addedLinesFromPatch(fileSection)
+          .join("\n")
+          .trim();
+        const looksLikeReview =
+          text && /"verdict"\s*:\s*"(approve|comment|block)"/i.test(text);
+        if (looksLikeReview) {
           candidate = text;
         }
       }
