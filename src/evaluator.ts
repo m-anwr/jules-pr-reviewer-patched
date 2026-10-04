@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { ReviewComment, ReviewResult, Severity } from "./types.js";
 import { parseReviewResponse } from "./validation.js";
+import { mapConcurrent } from "./utils.js";
 
 export type EvalMode = "mock" | "live";
 
@@ -68,12 +69,15 @@ export async function loadCases(casesDir: string): Promise<EvalCase[]> {
     .map((e) => e.name)
     .sort();
 
-  const cases: EvalCase[] = [];
-  for (const file of files) {
-    const raw = await fs.readFile(path.join(casesDir, file), "utf-8");
-    const parsed = JSON.parse(raw) as unknown;
-    cases.push(validateEvalCase(parsed, file));
-  }
+  const cases = await mapConcurrent(
+    files,
+    async (file) => {
+      const raw = await fs.readFile(path.join(casesDir, file), "utf-8");
+      const parsed = JSON.parse(raw) as unknown;
+      return validateEvalCase(parsed, file);
+    },
+    5
+  );
 
   return cases;
 }
